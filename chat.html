@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Secure Chat</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .messages-container {
+            scrollbar-width: thin;
+            scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+        }
+        .messages-container::-webkit-scrollbar {
+            width: 4px;
+        }
+        .messages-container::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .messages-container::-webkit-scrollbar-thumb {
+            background-color: rgba(156, 163, 175, 0.3);
+            border-radius: 20px;
+        }
+        .message-appear {
+            animation: messageAppear 0.2s ease-out forwards;
+        }
+        @keyframes messageAppear {
+            from {
+                opacity: 0;
+                transform: translateY(8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        #toast-container {
+            position: fixed;
+            top: 1rem;
+            right: 1rem;
+            z-index: 50;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+            max-width: 24rem;
+            width: 100%;
+            pointer-events: none;
+        }
+        .toast {
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            color: white;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            animation: slideIn 0.3s ease-out forwards, fadeOut 0.5s ease-out 2.5s forwards;
+            max-width: 100%;
+            pointer-events: auto;
+        }
+        
+        .toast.success { background-color: #10b981; }
+        .toast.info { background-color: #3b82f6; }
+        .toast.warning { background-color: #f59e0b; }
+        .toast.error { background-color: #ef4444; }
+        
+        @keyframes slideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+        
+        @keyframes fadeOut {
+            from {
+                opacity: 1;
+                max-height: 200px;
+                margin-bottom: 0.5rem;
+                padding: 0.75rem 1rem;
+            }
+            to {
+                opacity: 0;
+                max-height: 0;
+                margin-bottom: 0;
+                padding: 0 1rem;
+            }
+        }
+
+        #scroll-bottom-button {
+            position: fixed;
+            bottom: 80px;
+            right: 20px;
+            background-color: rgba(31, 41, 55, 0.8);
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+            transition: all 0.2s ease;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 40;
+        }
+        
+        #scroll-bottom-button.visible {
+            opacity: 1;
+            pointer-events: auto;
+            transform: translateY(0);
+        }
+        
+        #scroll-bottom-button:hover {
+            background-color: rgba(31, 41, 55, 1);
+            transform: translateY(-2px);
+        }
+        
+        #scroll-bottom-button.has-new-message::after {
+            content: '';
+            position: absolute;
+            top: -2px;
+            right: -2px;
+            width: 12px;
+            height: 12px;
+            background-color: #ef4444;
+            border-radius: 50%;
+            border: 2px solid white;
+        }
+    </style>
+</head>
+<body class="h-[100dvh] flex flex-col bg-white font-sans overflow-hidden">
+    <header class="w-full bg-white border-b border-gray-100 px-6 py-3">
+        <div class="flex items-center justify-between max-w-5xl mx-auto">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 bg-gray-900 rounded-full flex items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.863 9.863 0 01-4.255-.949L3 20l1.395-3.72C3.512 15.042 3 13.574 3 12c0-4.418 4.03-8 9-8s9 3.582 9 8z" />
+                    </svg>
+                </div>
+                <h1 class="text-lg font-semibold text-gray-900">Secure Chat</h1>
+            </div>
+            <div class="flex items-center gap-4">
+                <div class="flex items-center gap-1 border border-gray-200 rounded-full px-3 py-1.5 text-xs text-gray-500">
+                    <span id="online-users-count">0</span>
+                    <span>Aktif</span>
+                </div>
+                <div class="flex items-center gap-2 bg-gray-100 py-1.5 px-4 rounded-full">
+                    <span class="w-2 h-2 bg-green-500 rounded-full"></span>
+                    <span id="current-user" class="text-sm text-gray-700 font-medium"></span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 overflow-y-auto px-4 py-4 bg-[#f8f9fa] messages-container" id="chat-container">
+        <div id="messages" class="space-y-3 max-w-5xl mx-auto pb-4"></div>
+    </main>
+
+    <div id="scroll-bottom-button" title="Aşağı git" onclick="scrollToBottom(true)">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+            <path fill-rule="evenodd" d="M16.707 10.293a1 1 0 010 1.414l-6 6a1 1 0 01-1.414 0l-6-6a1 1 0 111.414-1.414L10 15.586l5.293-5.293a1 1 0 011.414 0z" clip-rule="evenodd" />
+        </svg>
+    </div>
+
+    <footer class="w-full bg-white border-t border-gray-100 p-4">
+        <form id="message-form" class="flex gap-2 max-w-5xl mx-auto">
+            <input type="text" id="message" 
+                class="flex-1 h-11 px-4 text-gray-700 bg-gray-50 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-900 focus:ring-1 focus:ring-gray-900 transition-colors duration-200"
+                placeholder="Mesajınızı yazın...">
+            <button type="submit" 
+                class="w-11 h-11 flex items-center justify-center bg-gray-900 text-white rounded-lg transition-colors duration-200 hover:bg-gray-800">
+                <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" 
+                    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/>
+                </svg>
+            </button>
+        </form>
+    </footer>
+    
+    <!-- Toast bildirim konteynerı -->
+    <div id="toast-container"></div>
+
+    <script>
+        const socket = io();
+        const username = getCookie('username');
+        const hash = getCookie('hash');
+        const messages = document.getElementById('messages');
+        const messageForm = document.getElementById('message-form');
+        const messageInput = document.getElementById('message');
+        const onlineUsersCount = document.getElementById('online-users-count');
+        const toastContainer = document.getElementById('toast-container');
+        const chatContainer = document.getElementById('chat-container');
+        const scrollBottomButton = document.getElementById('scroll-bottom-button');
+        let mySocketId = null;
+        let isNearBottom = true;
+        let hasNewMessage = false;
+
+        document.getElementById('current-user').textContent = username;
+
+        function showToast(message, type = 'info') {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            let icon = '';
+            if (type === 'success') {
+                icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd" /></svg>';
+            } else if (type === 'info') {
+                icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clip-rule="evenodd" /></svg>';
+            } else if (type === 'warning') {
+                icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>';
+            } else if (type === 'error') {
+                icon = '<svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd" /></svg>';
+            }
+            
+            toast.innerHTML = `
+                <div class="flex items-center">
+                    ${icon}
+                    <span>${message}</span>
+                </div>
+                <button onclick="this.parentElement.remove()" class="ml-3 text-white opacity-70 hover:opacity-100 focus:outline-none">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clip-rule="evenodd" />
+                    </svg>
+                </button>
+            `;
+            
+            toastContainer.appendChild(toast);
+            
+            setTimeout(() => {
+                if (toast.parentElement) {
+                    toast.addEventListener('animationend', function(e) {
+                        if (e.animationName === 'fadeOut') {
+                            toast.remove();
+                        }
+                    });
+                }
+            }, 3000);
+        }
+
+        socket.on('connect', () => {
+            mySocketId = socket.id;
+            showToast('Bağlantı kuruldu', 'success');
+        });
+
+        socket.on('message-history', (history) => {
+            messages.innerHTML = '';
+            history.forEach(msg => displayMessage(msg));
+            if (history.length > 0) {
+                showToast(`${history.length} mesaj yüklendi`, 'info');
+            }
+        });
+
+        socket.on('online-users', (count) => {
+            onlineUsersCount.textContent = count;
+        });
+        
+        socket.on('user-activity', (data) => {
+            if (data.username !== username) {
+                if (data.type === 'join') {
+                    showToast(`${data.username} sohbete katıldı`, 'info');
+                } else if (data.type === 'leave') {
+                    showToast(`${data.username} sohbetten ayrıldı`, 'warning');
+                }
+            }
+        });
+
+        messageForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const message = messageInput.value.trim();
+            if (message) {
+                socket.emit('message', {
+                    username,
+                    message: CryptoJS.AES.encrypt(message, hash).toString(),
+                });
+                messageInput.value = '';
+                // showToast('Mesaj gönderildi', 'success');
+            }
+        });
+
+        socket.on('message', (msg) => {
+            displayMessage(msg);
+            
+            if (isNearBottom) {
+                scrollToBottom();
+            } else {
+                hasNewMessage = true;
+                scrollBottomButton.classList.add('has-new-message');
+                
+                if (msg.username === username || msg.senderId === mySocketId) {
+                    scrollToBottom();
+                }
+            }
+        });
+
+        chatContainer.addEventListener('scroll', function() {
+            const isScrolledToBottom = chatContainer.scrollHeight - chatContainer.clientHeight - chatContainer.scrollTop < 100;
+            
+            if (isScrolledToBottom) {
+                isNearBottom = true;
+                scrollBottomButton.classList.remove('visible');
+                scrollBottomButton.classList.remove('has-new-message');
+                hasNewMessage = false;
+            } else {
+                isNearBottom = false;
+                scrollBottomButton.classList.add('visible');
+            }
+        });
+
+        function displayMessage(msg) {
+            const messageElement = document.createElement('div');
+            const isOwnMessage = msg.username === username || msg.senderId === mySocketId;
+            
+            messageElement.className = `flex ${isOwnMessage ? 'justify-end' : 'justify-start'} message-appear`;
+
+            let messageText;
+            try {
+                messageText = CryptoJS.AES.decrypt(msg.message, hash).toString(CryptoJS.enc.Utf8);
+                if (!messageText) throw new Error();
+            } catch (error) {
+                messageText = msg.message;
+                if (!isOwnMessage) {
+                    // showToast('Mesaj çözülemedi, anahtarlar eşleşmiyor olabilir', 'error');
+                }
+            }
+
+            const timestamp = msg.timestamp ? new Date(msg.timestamp).toLocaleTimeString() : new Date().toLocaleTimeString();
+
+            messageElement.innerHTML = `
+                <div class="max-w-[75%] p-3 rounded-lg ${
+                    isOwnMessage 
+                    ? 'bg-gray-900 text-white' 
+                    : 'bg-white border border-gray-200'
+                }">
+                    <div class="flex items-center gap-2">
+                        <span class="${isOwnMessage ? 'text-gray-300' : 'text-gray-700'} text-sm font-medium">
+                            ${msg.username}
+                        </span>
+                        <span class="${isOwnMessage ? 'text-gray-400' : 'text-gray-400'} text-xs">
+                            ${timestamp}
+                        </span>
+                    </div>
+                    <p class="mt-1 text-sm break-words leading-relaxed">
+                        ${messageText}
+                    </p>
+                    ${!isOwnMessage ? `
+                        <div class="text-xs text-gray-400 mt-1.5 border-t border-gray-100 pt-1.5">
+                            <span class="font-medium">Şifreli:</span> ${msg.message.substr(0, 16)}...
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+
+            messages.appendChild(messageElement);
+            scrollToBottom();
+        }
+
+        function scrollToBottom(force = false) {
+            if (force) {
+                chatContainer.scrollTo({
+                    top: chatContainer.scrollHeight,
+                    behavior: 'smooth'
+                });
+                
+                setTimeout(() => {
+                    scrollBottomButton.classList.remove('visible');
+                    scrollBottomButton.classList.remove('has-new-message');
+                    hasNewMessage = false;
+                }, 300);
+            } else {
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+
+        function getCookie(name) {
+            const value = `; ${document.cookie}`;
+            const parts = value.split(`; ${name}=`);
+            if (parts.length === 2) return parts.pop().split(';').shift();
+        }
+
+        document.addEventListener('keydown', (e) => {
+            if (e.target === messageInput) return;
+            messageInput.focus();
+        });
+
+        messageInput.addEventListener('focus', () => {
+            setTimeout(scrollToBottom, 100);
+        });
+
+        window.visualViewport.addEventListener('resize', () => {
+            if (document.activeElement === messageInput) {
+                setTimeout(scrollToBottom, 100);
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            if (isNearBottom) {
+                scrollToBottom();
+            }
+        });
+    </script>
+</body>
+</html>
