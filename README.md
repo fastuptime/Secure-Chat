@@ -21,10 +21,11 @@ Secure Chat, mesajların uçtan uca şifrelendiği güvenli bir anlık mesajlaş
 ## 🖼️ Ekran Görüntüleri
 
 ### Giriş Ekranı
-![Login Screen](screenshots/login-screen.png)
+![image](https://github.com/user-attachments/assets/6f4af9f3-eb9d-455d-ba55-06aba94b6cd7)
+
 
 ### Sohbet Ekranı
-![Chat Screen](screenshots/chat-screen.png)
+![image](https://github.com/user-attachments/assets/daf77abb-8edf-48cb-8288-0437abeb57d3)
 
 ## 🛠️ Teknolojiler
 
